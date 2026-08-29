@@ -43,12 +43,12 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
     // ECC82 / 12AU7
     // Koren mu (amplification factor), not small-signal voltage gain
     public static final FloatProperty GAIN = new FloatProperty(PowerGrid.MOD_ID, "tube_gain", 21.5f, 1, 100);
-    public static final FloatProperty K_G = new FloatProperty(PowerGrid.MOD_ID, "tube_kg", 1_180, 200, 20_000);
+    public static final FloatProperty K_G = new FloatProperty(PowerGrid.MOD_ID, "tube_kg", 1_200, 200, 20_000);
     public static final FloatProperty K_P = new FloatProperty(PowerGrid.MOD_ID, "tube_kp", 84, 50, 2000);
     public static final FloatProperty K_VB = new FloatProperty(PowerGrid.MOD_ID, "tube_kvb", 300, 10, 1000);
     public static final FloatProperty EX = new FloatProperty(PowerGrid.MOD_ID, "tube_ex", 1.3f, 1.2f, 1.6f);
     public static final FloatProperty SATURATION_CURRENT = new FloatProperty(PowerGrid.MOD_ID, "tube_saturation_current", 0.04f, 0.001f, 20);
-    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6.3f, 1f, 16f);
+    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6f, 1f, 16f);
     public static final CalculatedProperty<Float> HEATER_POWER = new CalculatedProperty<>(PowerGrid.MOD_ID, "tube_heater_power",
             state -> 1.9f,
             value -> String.format("%.1f W", value));
