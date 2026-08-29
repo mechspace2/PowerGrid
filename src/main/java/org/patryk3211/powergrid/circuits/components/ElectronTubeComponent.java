@@ -18,6 +18,7 @@ package org.patryk3211.powergrid.circuits.components;
 import com.google.common.collect.ImmutableCollection;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.render.RenderTypes;
+import dev.engine_room.flywheel.lib.model.baked.PartialModel;
 import net.createmod.catnip.render.CachedBuffers;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -35,22 +36,26 @@ import org.patryk3211.powergrid.circuits.schematic.PlacedComponent;
 import org.patryk3211.powergrid.circuits.thermal.ThermalBuilder;
 import org.patryk3211.powergrid.collections.ModdedPartialModels;
 import org.patryk3211.powergrid.electricity.base.ThermalBehaviour;
+import org.patryk3211.powergrid.electricity.sim.AbstractElectricWire;
 import org.patryk3211.powergrid.electricity.sim.special.ElectronTubeWire;
 
 public class ElectronTubeComponent extends MirrorableComponent implements IRenderedComponent {
+    // ECC82 / 12AU7
     // Koren mu (amplification factor), not small-signal voltage gain
-    public static final FloatProperty GAIN = new FloatProperty(PowerGrid.MOD_ID, "tube_gain", 5, 1, 100);
-    // Doubled from 6800 to preserve operating point with the Koren (1 + sgn(E1)) factor
-    public static final FloatProperty K_G = new FloatProperty(PowerGrid.MOD_ID, "tube_kg", 13_600, 200, 20_000);
-    public static final FloatProperty K_P = new FloatProperty(PowerGrid.MOD_ID, "tube_kp", 600, 50, 2000);
+    public static final FloatProperty GAIN = new FloatProperty(PowerGrid.MOD_ID, "tube_gain", 21.5f, 1, 100);
+    public static final FloatProperty K_G = new FloatProperty(PowerGrid.MOD_ID, "tube_kg", 1_180, 200, 20_000);
+    public static final FloatProperty K_P = new FloatProperty(PowerGrid.MOD_ID, "tube_kp", 84, 50, 2000);
     public static final FloatProperty K_VB = new FloatProperty(PowerGrid.MOD_ID, "tube_kvb", 300, 10, 1000);
-    public static final FloatProperty EX = new FloatProperty(PowerGrid.MOD_ID, "tube_ex", 1.5f, 1.2f, 1.6f);
-    public static final FloatProperty SATURATION_CURRENT = new FloatProperty(PowerGrid.MOD_ID, "tube_saturation_current", 0.1f, 0.001f, 20);
-    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6f, 1f, 16f);
-    public static final CalculatedProperty<Float> HEATER_POWER = new CalculatedProperty<>(PowerGrid.MOD_ID, "tube_heater_power", state -> {
-        var Is = state.get(SATURATION_CURRENT);
-        return Math.max(5f, Is * 50f);
-        }, value -> String.format("%.1f W", value));
+    public static final FloatProperty EX = new FloatProperty(PowerGrid.MOD_ID, "tube_ex", 1.3f, 1.2f, 1.6f);
+    public static final FloatProperty SATURATION_CURRENT = new FloatProperty(PowerGrid.MOD_ID, "tube_saturation_current", 0.04f, 0.001f, 20);
+    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6.3f, 1f, 16f);
+    public static final CalculatedProperty<Float> HEATER_POWER = new CalculatedProperty<>(PowerGrid.MOD_ID, "tube_heater_power",
+            state -> 1.9f,
+            value -> String.format("%.1f W", value));
+    public static final FloatProperty PLATE_DISSIPATION = new FloatProperty(PowerGrid.MOD_ID, "tube_plate_dissipation", 2.75f, 0.25f, 100);
+
+    private static final float REDPLATE_START_C = 130f;
+    private static final float REDPLATE_FULL_C = 175f;
 
     public ElectronTubeComponent(ComponentFootprint footprint) {
         super(footprint);
@@ -59,7 +64,7 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
     @Override
     protected void addProperties(ImmutableCollection.Builder<ComponentProperty<?>> properties) {
         super.addProperties(properties);
-        properties.add(GAIN, K_G, K_P, K_VB, EX, SATURATION_CURRENT, HEATER_VOLTAGE, HEATER_POWER);
+        properties.add(GAIN, K_G, K_P, K_VB, EX, SATURATION_CURRENT, HEATER_VOLTAGE, HEATER_POWER, PLATE_DISSIPATION);
     }
 
     @Override
@@ -98,6 +103,19 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
                     data.prev = data.current;
                     data.current = Mth.clamp((temperature - 1000) / 400f, 0, 1.125f);
                 });
+
+        addPlateThermal(thermals, tube, data, placed.get(PLATE_DISSIPATION));
+    }
+
+    static void addPlateThermal(ThermalBuilder.IEmitter thermals, AbstractElectricWire tube, RenderData data, float plateWatts) {
+        thermals.builder()
+                .addHeatSource(tube)
+                .setThermalMass(Math.max(0.015f, plateWatts * 0.01f))
+                .setMaxPower(plateWatts, 125f)
+                .withTemperatureCallback(temperature -> {
+                    data.redplatePrev = data.redplate;
+                    data.redplate = Mth.clamp((temperature - REDPLATE_START_C) / (REDPLATE_FULL_C - REDPLATE_START_C), 0, 1.25f);
+                });
     }
 
     @Override
@@ -108,15 +126,20 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
             if (props.contains(K_P.id().toString()))
                 return;
 
+            // Mid-migration saves have to keep the old stuff
+            final float legacyKp = 600;
+            final float legacyKvb = 300;
+            final float legacyEx = 1.5f;
+
             var fromAnodeResistance = props.contains("powergrid:tube_anode_resistance");
             if (fromAnodeResistance) {
                 var resistance = props.getFloat("powergrid:tube_anode_resistance");
                 var kg = ElectronTubeWire.calculateKg1(
                         1, 0,
                         props.getFloat(GAIN.id().toString()),
-                        K_P.defaultValue(),
-                        K_VB.defaultValue(),
-                        EX.defaultValue(),
+                        legacyKp,
+                        legacyKvb,
+                        legacyEx,
                         1 / resistance);
                 PowerGrid.LOGGER.info("Fixing electron tube anode resistance ({}) into k_g ({})", resistance, kg);
                 props.putFloat(K_G.id().toString(), kg);
@@ -127,9 +150,9 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
                 props.putFloat(K_G.id().toString(), kg * 2f);
             }
 
-            props.putFloat(K_P.id().toString(), K_P.defaultValue());
-            props.putFloat(K_VB.id().toString(), K_VB.defaultValue());
-            props.putFloat(EX.id().toString(), EX.defaultValue());
+            props.putFloat(K_P.id().toString(), legacyKp);
+            props.putFloat(K_VB.id().toString(), legacyKvb);
+            props.putFloat(EX.id().toString(), legacyEx);
             tag.put("Properties", props);
         }
     }
@@ -137,21 +160,41 @@ public class ElectronTubeComponent extends MirrorableComponent implements IRende
     public static class RenderData {
         float prev;
         float current;
+        float redplatePrev;
+        float redplate;
+    }
+
+    static void renderTubeGlow(CircuitBoardBlockEntity be, PlacedComponent placed, float partialTicks, PoseStack ms, MultiBufferSource bufferSource, PartialModel glow, float heaterScale) {
+        float heater = 0;
+        float redplate = 0;
+        if (placed.customData instanceof RenderData data) {
+            heater = Mth.lerp(partialTicks, data.prev, data.current);
+            redplate = Mth.lerp(partialTicks, data.redplatePrev, data.redplate);
+        }
+
+        int heaterAlpha = (int) (heater * heaterScale);
+        if (heaterAlpha > 0) {
+            CachedBuffers.partial(glow, be.getBlockState())
+                    .disableDiffuse()
+                    .color(heaterAlpha, heaterAlpha, heaterAlpha, 255)
+                    .light(LightTexture.FULL_BRIGHT)
+                    .renderInto(ms, bufferSource.getBuffer(RenderTypes.additive()));
+        }
+
+        if (redplate <= 0.01f)
+            return;
+        int r = (int) (Mth.clamp(redplate, 0, 1.25f) * 220);
+        int g = (int) (redplate * redplate * 55);
+        int b = (int) (redplate * redplate * redplate * 12);
+        CachedBuffers.partial(glow, be.getBlockState())
+                .disableDiffuse()
+                .color(r, g, b, 255)
+                .light(LightTexture.FULL_BRIGHT)
+                .renderInto(ms, bufferSource.getBuffer(RenderTypes.additive()));
     }
 
     @Override
     public void render(CircuitBoardBlockEntity be, PlacedComponent placed, float partialTicks, PoseStack ms, MultiBufferSource bufferSource, int light, int overlay) {
-        int a = 0;
-        if(placed.customData instanceof RenderData data) {
-            a = (int) (Mth.lerp(partialTicks, data.prev, data.current) * 160);
-        }
-        if(a == 0)
-            return;
-        var buffer = CachedBuffers.partial(ModdedPartialModels.ELECTRON_TUBE_GLOW, be.getBlockState());
-        buffer
-                .disableDiffuse()
-                .color(a, a, a, 255)
-                .light(LightTexture.FULL_BRIGHT)
-                .renderInto(ms, bufferSource.getBuffer(RenderTypes.additive()));
+        renderTubeGlow(be, placed, partialTicks, ms, bufferSource, ModdedPartialModels.ELECTRON_TUBE_GLOW, 160);
     }
 }
