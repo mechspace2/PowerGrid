@@ -43,7 +43,7 @@ public class PentodeComponent extends MirrorableComponent implements IRenderedCo
     public static final FloatProperty K_VB = new FloatProperty(PowerGrid.MOD_ID, "tube_kvb", 17.9f, 1, 1000);
     public static final FloatProperty EX = new FloatProperty(PowerGrid.MOD_ID, "tube_ex", 1.35f, 1.2f, 1.6f);
     public static final FloatProperty SATURATION_CURRENT = new FloatProperty(PowerGrid.MOD_ID, "tube_saturation_current", 0.065f, 0.001f, 20);
-    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6.3f, 1f, 16f);
+    public static final FloatProperty HEATER_VOLTAGE = new FloatProperty(PowerGrid.MOD_ID, "tube_heater_voltage", 6f, 1f, 16f);
     public static final CalculatedProperty<Float> HEATER_POWER = new CalculatedProperty<>(PowerGrid.MOD_ID, "tube_heater_power",
             state -> 4.8f,
             value -> String.format("%.1f W", value));
